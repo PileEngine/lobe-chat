@@ -289,13 +289,14 @@ export const chatTopic: StateCreator<
     const topic = topicSelectors.getTopicById(id)(get());
     if (!topic) return;
 
-    // Merge with existing metadata
-    const mergedMetadata = {
-      ...topic.metadata,
-      ...metadata,
-    };
+    // Optimistic update with merged metadata
+    const mergedMetadata = { ...topic.metadata, ...metadata };
+    get().internal_dispatchTopic({ type: 'updateTopic', id, value: { metadata: mergedMetadata } });
 
-    await get().internal_updateTopic(id, { metadata: mergedMetadata });
+    get().internal_updateTopicLoading(id, true);
+    await topicService.updateTopicMetadata(id, metadata);
+    await get().refreshTopic();
+    get().internal_updateTopicLoading(id, false);
   },
 
   updateTopicTitle: async (id, title) => {
