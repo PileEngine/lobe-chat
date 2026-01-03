@@ -249,7 +249,7 @@ export const createAgentSlice: StateCreator<
   updateAgentLocalSystemConfigById: async (agentId, config) => {
     if (!agentId) return;
 
-    await get().updateAgentConfigById(agentId, { agentConfig: { localSystem: config } });
+    await get().updateAgentChatConfigById(agentId, { localSystem: config });
   },
 
   updateAgentMeta: async (meta) => {

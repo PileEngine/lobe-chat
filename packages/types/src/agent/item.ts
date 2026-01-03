@@ -3,17 +3,10 @@ import { LLMParams } from 'model-bank';
 import { FileItem } from '../files';
 import { KnowledgeBaseItem } from '../knowledgeBase';
 import { FewShots } from '../llm';
-import { LobeAgentModeConfig } from './agentConfig';
 import { LobeAgentChatConfig } from './chatConfig';
 import { LobeAgentTTSConfig } from './tts';
 
 export interface LobeAgentConfig {
-  /**
-   * Agent 模式配置
-   * 用于控制 Agent 的执行行为和桌面端 Local System 相关配置
-   */
-  agentConfig?: LobeAgentModeConfig;
-
   avatar?: string;
 
   chatConfig: LobeAgentChatConfig;
@@ -83,7 +76,6 @@ export type LobeAgentConfigKeys =
 
 // Agent database item type (independent from schema)
 export interface AgentItem {
-  agentConfig?: LobeAgentModeConfig | null;
   avatar?: string | null;
   backgroundColor?: string | null;
   chatConfig?: LobeAgentChatConfig | null;

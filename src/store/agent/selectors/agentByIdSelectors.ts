@@ -1,12 +1,7 @@
 import { DEFAULT_PROVIDER } from '@lobechat/business-const';
 import { DEFAULT_MODEL, DEFAUTT_AGENT_TTS_CONFIG } from '@lobechat/const';
 import type { AgentBuilderContext } from '@lobechat/context-engine';
-import {
-  type AgentMode,
-  type LobeAgentModeConfig,
-  type LobeAgentTTSConfig,
-  type LocalSystemConfig,
-} from '@lobechat/types';
+import { type AgentMode, type LobeAgentTTSConfig, type LocalSystemConfig } from '@lobechat/types';
 
 import type { AgentStoreState } from '../initialState';
 import { agentSelectors } from './selectors';
@@ -51,30 +46,15 @@ const isAgentConfigLoadingById = (agentId: string) => (s: AgentStoreState) =>
   !agentId || !s.agentMap[agentId];
 
 /**
- * Get agent mode config by agentId
- */
-const getAgentModeConfigById =
-  (agentId: string) =>
-  (s: AgentStoreState): LobeAgentModeConfig | undefined =>
-    agentSelectors.getAgentConfigById(agentId)(s)?.agentConfig;
-
-/**
  * Get agent mode by agentId
- * Supports backward compatibility: prefers agentConfig.mode, falls back to enableAgentMode
+ * Now reads from chatConfig.agentMode and chatConfig.enableAgentMode
  */
 const getAgentModeById =
   (agentId: string) =>
   (s: AgentStoreState): AgentMode | undefined => {
     const config = agentSelectors.getAgentConfigById(agentId)(s);
 
-    // Prefer agentConfig.mode if available
-    if (config?.agentConfig?.mode) {
-      return config.agentConfig.mode;
-    }
-
-    // Fallback: convert deprecated enableAgentMode to mode
-    // enableAgentMode: true -> 'auto' (default agent mode)
-    // enableAgentMode: false/undefined -> undefined (agent mode disabled)
+    // Fallback: convert enableAgentMode to mode
     if (config?.enableAgentMode) {
       return 'auto';
     }
@@ -95,11 +75,12 @@ const getAgentEnableModeById =
 
 /**
  * Get local system config by agentId
+ * Now reads from chatConfig.localSystem
  */
 const getAgentLocalSystemConfigById =
   (agentId: string) =>
   (s: AgentStoreState): LocalSystemConfig | undefined =>
-    getAgentModeConfigById(agentId)(s)?.localSystem;
+    agentSelectors.getAgentConfigById(agentId)(s)?.chatConfig?.localSystem;
 
 /**
  * Get working directory by agentId
@@ -142,7 +123,6 @@ export const agentByIdSelectors = {
   getAgentKnowledgeBasesById,
   getAgentLocalSystemConfigById,
   getAgentModeById,
-  getAgentModeConfigById,
   getAgentModelById,
   getAgentModelProviderById,
   getAgentPluginsById,

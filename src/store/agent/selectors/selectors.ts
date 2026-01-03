@@ -11,7 +11,6 @@ import {
   type KnowledgeItem,
   KnowledgeType,
   type LobeAgentConfig,
-  type LobeAgentModeConfig,
   type LobeAgentTTSConfig,
   type LocalSystemConfig,
   type MetaData,
@@ -229,24 +228,13 @@ const openingMessage = (s: AgentStoreState) => currentAgentConfig(s)?.openingMes
 // ==========   Agent Mode Config   ============== //
 
 /**
- * Get current agent's mode config
- */
-const currentAgentModeConfig = (s: AgentStoreState): LobeAgentModeConfig | undefined =>
-  currentAgentConfig(s)?.agentConfig;
-
-/**
  * Get current agent's mode
- * Supports backward compatibility: prefers agentConfig.mode, falls back to enableAgentMode
+ * Now reads from chatConfig.agentMode and chatConfig.enableAgentMode
  */
 const currentAgentMode = (s: AgentStoreState): AgentMode | undefined => {
   const config = currentAgentConfig(s);
 
-  // Prefer agentConfig.mode if available
-  if (config?.agentConfig?.mode) {
-    return config.agentConfig.mode;
-  }
-
-  // Fallback: convert deprecated enableAgentMode to mode
+  // Fallback: convert enableAgentMode to mode
   if (config?.enableAgentMode) {
     return 'auto';
   }
@@ -261,9 +249,10 @@ const isAgentModeEnabled = (s: AgentStoreState): boolean => currentAgentMode(s) 
 
 /**
  * Get current agent's local system config
+ * Now reads from chatConfig.localSystem
  */
 const currentAgentLocalSystemConfig = (s: AgentStoreState): LocalSystemConfig | undefined =>
-  currentAgentModeConfig(s)?.localSystem;
+  currentAgentConfig(s)?.chatConfig?.localSystem;
 
 /**
  * Get current agent's working directory
@@ -281,7 +270,6 @@ export const agentSelectors = {
   currentAgentLocalSystemConfig,
   currentAgentMeta,
   currentAgentMode,
-  currentAgentModeConfig,
   currentAgentModel,
   currentAgentModelProvider,
   currentAgentPlugins,

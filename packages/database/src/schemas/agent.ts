@@ -1,6 +1,6 @@
 /* eslint-disable sort-keys-fix/sort-keys-fix  */
-import type { LobeAgentChatConfig, LobeAgentModeConfig, LobeAgentTTSConfig } from '@lobechat/types';
-import { AgentModeConfigSchema } from '@lobechat/types';
+import type { LobeAgentChatConfig, LobeAgentTTSConfig } from '@lobechat/types';
+import { AgentChatConfigSchema } from '@lobechat/types';
 import {
   boolean,
   index,
@@ -48,7 +48,6 @@ export const agents = pgTable(
       .notNull(),
 
     chatConfig: jsonb('chat_config').$type<LobeAgentChatConfig>(),
-    agentConfig: jsonb('agent_config').$type<LobeAgentModeConfig>(),
 
     fewShots: jsonb('few_shots'),
     model: text('model'),
@@ -80,8 +79,8 @@ export const agents = pgTable(
 );
 
 export const insertAgentSchema = createInsertSchema(agents, {
-  // Override agentConfig type to use the proper schema
-  agentConfig: AgentModeConfigSchema.nullable().optional(),
+  // Override chatConfig type to use the proper schema
+  chatConfig: AgentChatConfigSchema.nullable().optional(),
 });
 
 export type NewAgent = typeof agents.$inferInsert;
