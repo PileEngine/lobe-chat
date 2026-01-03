@@ -82,7 +82,7 @@ const WorkingDirectory = memo(() => {
       className={styles.base}
       gap={6}
       horizontal
-      style={{ cursor: 'pointer', height: 40, padding: '0 12px' }}
+      style={{ cursor: 'pointer', height: 32, padding: '0 12px' }}
     >
       <Icon icon={SquircleDashed} size={16} />
       <span>{t('localSystem.workingDirectory.notSet')}</span>
