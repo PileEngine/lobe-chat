@@ -2,7 +2,12 @@
 // Note: To make the code more logic and readable, we just disable the auto sort key eslint rule
 // DON'T REMOVE THE FIRST LINE
 import { chainSummaryTitle } from '@lobechat/prompts';
-import { type MessageMapScope, TraceNameMap, type UIChatMessage } from '@lobechat/types';
+import {
+  type ChatTopicMetadata,
+  type MessageMapScope,
+  TraceNameMap,
+  type UIChatMessage,
+} from '@lobechat/types';
 import isEqual from 'fast-deep-equal';
 import { t } from 'i18next';
 import useSWR, { type SWRResponse } from 'swr';
@@ -75,6 +80,12 @@ export interface ChatTopicAction {
    * @param options - Options object or boolean for backward compatibility (skipRefreshMessage)
    */
   switchTopic: (id?: string, options?: boolean | SwitchTopicOptions) => Promise<void>;
+  /**
+   * Update topic metadata
+   * @param id - Topic ID to update
+   * @param metadata - Partial metadata to merge with existing metadata
+   */
+  updateTopicMetadata: (id: string, metadata: Partial<ChatTopicMetadata>) => Promise<void>;
   updateTopicTitle: (id: string, title: string) => Promise<void>;
   useFetchTopics: (
     enable: boolean,
@@ -272,6 +283,19 @@ export const chatTopic: StateCreator<
   },
   favoriteTopic: async (id, favorite) => {
     await get().internal_updateTopic(id, { favorite });
+  },
+
+  updateTopicMetadata: async (id, metadata) => {
+    const topic = topicSelectors.getTopicById(id)(get());
+    if (!topic) return;
+
+    // Merge with existing metadata
+    const mergedMetadata = {
+      ...topic.metadata,
+      ...metadata,
+    };
+
+    await get().internal_updateTopic(id, { metadata: mergedMetadata });
   },
 
   updateTopicTitle: async (id, title) => {
