@@ -1,4 +1,5 @@
 // @ts-nocheck
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { parseDefaultThemeFromCountry } from '@lobechat/utils/server';
 import debug from 'debug';
@@ -19,7 +20,7 @@ import { parseBrowserLanguage } from './utils/locale';
 import { RouteVariants } from './utils/server/routeVariants';
 
 // ==========================================
-// 1. Basic Auth 核心逻辑（只拦截页面，不拦截 API）
+// 1. Basic Auth 核心逻辑
 // ==========================================
 function basicAuthMiddleware(req: NextRequest) {
   const user = process.env.BASIC_AUTH_USER;
@@ -29,7 +30,7 @@ function basicAuthMiddleware(req: NextRequest) {
 
   const { pathname } = req.nextUrl;
 
-  // 过滤：API 请求和静态文件不触发认证，防止反复弹窗
+  // 过滤 API 和静态资源
   const isApi = ['/api', '/trpc', '/webapi', '/oidc'].some((p) => pathname.startsWith(p));
   const isAsset = pathname.includes('.') || pathname.startsWith('/_next') || pathname.startsWith('/icons');
 
@@ -41,7 +42,10 @@ function basicAuthMiddleware(req: NextRequest) {
       const authValue = authHeader.split(' ')[1];
       const [u, p] = atob(authValue).split(':');
       if (u === user && p === pass) return null;
-    } catch (e) {}
+    } catch (e) {
+      // 加上注释防止 empty block 报错
+      console.debug('auth decode failed');
+    }
   }
 
   const res = new NextResponse('Authentication Required', { status: 401 });
@@ -49,9 +53,8 @@ function basicAuthMiddleware(req: NextRequest) {
   return res;
 }
 
+// 只保留用到的 log 实例
 const logDefault = debug('middleware:default');
-const logNextAuth = debug('middleware:next-auth');
-const logClerk = debug('middleware:clerk');
 const OIDC_SESSION_HEADER = 'x-oidc-session-sync';
 
 export const config = {
@@ -82,7 +85,6 @@ export const config = {
 const backendApiEndpoints = ['/api', '/trpc', '/webapi', '/oidc'];
 
 const defaultMiddleware = (request: NextRequest) => {
-  // --- 注入 Basic Auth ---
   const authRes = basicAuthMiddleware(request);
   if (authRes) return authRes;
 
@@ -90,7 +92,6 @@ const defaultMiddleware = (request: NextRequest) => {
   logDefault('Processing request: %s %s', request.method, request.url);
 
   if (backendApiEndpoints.some((path) => url.pathname.startsWith(path))) {
-    logDefault('Skipping API request: %s', url.pathname);
     return NextResponse.next();
   }
 
@@ -108,15 +109,13 @@ const defaultMiddleware = (request: NextRequest) => {
   }
 
   url.pathname = `/${route}` + (url.pathname === '/' ? '' : url.pathname);
-  const rewrite = NextResponse.rewrite(url, { status: 200 });
-  return rewrite;
+  return NextResponse.rewrite(url, { status: 200 });
 };
 
 const isPublicRoute = createRouteMatcher(['/api/auth(.*)', '/api/webhooks(.*)', '/webapi(.*)', '/trpc(.*)', '/next-auth/(.*)', '/login', '/signup', '/oauth/consent/(.*)', '/oidc/handoff', '/oidc/token']);
 const isProtectedRoute = createRouteMatcher(['/settings(.*)', '/knowledge(.*)', '/onboard(.*)', '/oauth(.*)']);
 
 const nextAuthMiddleware = NextAuth.auth((req) => {
-  // --- 注入 Basic Auth ---
   const authRes = basicAuthMiddleware(req);
   if (authRes) return authRes;
 
@@ -127,6 +126,9 @@ const nextAuthMiddleware = NextAuth.auth((req) => {
 
   if (isLoggedIn) {
     response.headers.set(OAUTH_AUTHORIZED, 'true');
+    if (oidcEnv.ENABLE_OIDC && session?.user?.id) {
+      response.headers.set(OIDC_SESSION_HEADER, session.user.id);
+    }
   } else if (isProtected) {
     const nextLoginUrl = new URL('/next-auth/signin', req.nextUrl.origin);
     nextLoginUrl.searchParams.set('callbackUrl', req.nextUrl.href);
@@ -137,7 +139,6 @@ const nextAuthMiddleware = NextAuth.auth((req) => {
 
 const clerkAuthMiddleware = clerkMiddleware(
   async (auth, req) => {
-    // --- 注入 Basic Auth ---
     const authRes = basicAuthMiddleware(req);
     if (authRes) return authRes;
 
@@ -155,7 +156,6 @@ const clerkAuthMiddleware = clerkMiddleware(
   { clockSkewInMs: 60 * 60 * 1000, signInUrl: '/login', signUpUrl: '/signup' },
 );
 
-// 保持原样导出
 export default authEnv.NEXT_PUBLIC_ENABLE_CLERK_AUTH
   ? clerkAuthMiddleware
   : authEnv.NEXT_PUBLIC_ENABLE_NEXT_AUTH
