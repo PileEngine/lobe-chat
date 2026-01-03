@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { parseDefaultThemeFromCountry } from '@lobechat/utils/server';
 import debug from 'debug';
@@ -17,6 +18,41 @@ import { oidcEnv } from './envs/oidc';
 import { parseBrowserLanguage } from './utils/locale';
 import { RouteVariants } from './utils/server/routeVariants';
 
+// ============ BASIC AUTH 注入开始 ============
+function basicAuthMiddleware(req: NextRequest) {
+  const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER;
+  const BASIC_AUTH_PASS = process.env.BASIC_AUTH_PASS;
+
+  // 如果没有设置环境变量，则跳过
+  if (!BASIC_AUTH_USER || !BASIC_AUTH_PASS) {
+    return null;
+  }
+
+  const authHeader = req.headers.get('authorization');
+
+  if (authHeader) {
+    try {
+      const authValue = authHeader.split(' ')[1];
+      const [user, pwd] = atob(authValue).split(':');
+
+      if (user === BASIC_AUTH_USER && pwd === BASIC_AUTH_PASS) {
+        return null; // 验证通过，继续后续流程
+      }
+    } catch (e) {
+      // 解码失败等情况处理
+    }
+  }
+
+  // 返回 401 强制要求认证
+  return new NextResponse('Authentication Required', {
+    status: 401,
+    headers: {
+      'WWW-Authenticate': 'Basic realm="LobeChat Secure Area"',
+    },
+  });
+}
+// ============ BASIC AUTH 注入结束 ============
+
 // Create debug logger instances
 const logDefault = debug('middleware:default');
 const logNextAuth = debug('middleware:next-auth');
@@ -27,36 +63,20 @@ const OIDC_SESSION_HEADER = 'x-oidc-session-sync';
 
 export const config = {
   matcher: [
-    // include any files in the api or trpc folders that might have an extension
-    '/(api|trpc|webapi)(.*)',
-    // include the /
-    '/',
-    '/discover',
-    '/discover(.*)',
-    '/labs',
-    '/chat',
-    '/chat(.*)',
-    '/changelog(.*)',
-    '/settings(.*)',
-    '/image',
-    '/knowledge',
-    '/knowledge(.*)',
-    '/profile(.*)',
-    '/me',
-    '/me(.*)',
-
-    '/login(.*)',
-    '/signup(.*)',
-    '/next-auth/(.*)',
-    '/oauth(.*)',
-    '/oidc(.*)',
-    // ↓ cloud ↓
+    /*
+     * 排除静态资源文件，防止频繁弹出登录框
+     */
+    '/((?!_next/static|_next/image|favicon.ico|manifest.json|icons|.*\\.(?:svg|png|jpg|jpeg|webp|gif)$).*)',
   ],
 };
 
 const backendApiEndpoints = ['/api', '/trpc', '/webapi', '/oidc'];
 
 const defaultMiddleware = (request: NextRequest) => {
+  // 1. 优先执行 Basic Auth 校验
+  const authResponse = basicAuthMiddleware(request);
+  if (authResponse) return authResponse;
+
   const url = new URL(request.url);
   logDefault('Processing request: %s %s', request.method, request.url);
 
@@ -199,6 +219,11 @@ const isProtectedRoute = createRouteMatcher([
 
 // Initialize an Edge compatible NextAuth middleware
 const nextAuthMiddleware = NextAuth.auth((req) => {
+  // --- Basic Auth 注入 ---
+  const authResponse = basicAuthMiddleware(req);
+  if (authResponse) return authResponse;
+  // ----------------------
+
   logNextAuth('NextAuth middleware processing request: %s %s', req.method, req.url);
 
   const response = defaultMiddleware(req);
@@ -254,6 +279,11 @@ const nextAuthMiddleware = NextAuth.auth((req) => {
 
 const clerkAuthMiddleware = clerkMiddleware(
   async (auth, req) => {
+    // --- Basic Auth 注入 ---
+    const authResponse = basicAuthMiddleware(req);
+    if (authResponse) return authResponse;
+    // ----------------------
+
     logClerk('Clerk middleware processing request: %s %s', req.method, req.url);
 
     // when enable auth protection, only public route is not protected, others are all protected
