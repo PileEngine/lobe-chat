@@ -18,96 +18,128 @@ import { oidcEnv } from './envs/oidc';
 import { parseBrowserLanguage } from './utils/locale';
 import { RouteVariants } from './utils/server/routeVariants';
 
-// ============ BASIC AUTH 逻辑核心 ============
+// ==========================================
+// 1. Basic Auth 核心校验函数
+// ==========================================
 function handleBasicAuth(req: NextRequest) {
   const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER;
   const BASIC_AUTH_PASS = process.env.BASIC_AUTH_PASS;
 
-  // 如果未配置环境变量，则不启用 Basic Auth
+  // 如果未配置环境变量，直接跳过认证逻辑
   if (!BASIC_AUTH_USER || !BASIC_AUTH_PASS) return null;
 
-  const authHeader = req.headers.get('authorization');
+  const { pathname } = req.nextUrl;
 
+  // 【核心过滤逻辑】
+  // 只有非 API 且非静态资源的路径（即真正的页面访问）才触发认证
+  const isApi = ['/api', '/trpc', '/webapi', '/oidc'].some((path) => pathname.startsWith(path));
+  const isStatic = pathname.startsWith('/_next') || pathname.includes('.') || pathname.startsWith('/icons');
+
+  // 如果是 API 或静态资源，直接放行
+  if (isApi || isStatic) return null;
+
+  // 获取并校验 Authorization 头
+  const authHeader = req.headers.get('authorization');
   if (authHeader) {
     try {
       const authValue = authHeader.split(' ')[1];
-      const [user, pwd] = atob(authValue).split(':');
-
-      if (user === BASIC_AUTH_USER && pwd === BASIC_AUTH_PASS) {
-        return null; // 验证成功
-      }
+      const [u, p] = atob(authValue).split(':');
+      if (u === BASIC_AUTH_USER && p === BASIC_AUTH_PASS) return null; // 认证成功
     } catch (e) {
-      console.error('Basic auth decode error');
+      // 解码失败时不执行操作，下文将返回 401
     }
   }
 
-  // 验证失败或未验证，返回 401
-  const response = new NextResponse('Authentication Required', { status: 401 });
-  response.headers.set('WWW-Authenticate', 'Basic realm="LobeChat Secure Area"');
-  return response;
+  // 认证失败或未认证，返回 401 响应头以弹出浏览器登录框
+  const res = new NextResponse('Authentication Required', { status: 401 });
+  res.headers.set('WWW-Authenticate', 'Basic realm="LobeChat Private"');
+  return res;
 }
+// ==========================================
 
-// 辅助函数：判断是否为静态资源或 API
-const isStaticOrApi = (pathname: string, backendApiEndpoints: string[]) => {
-  return (
-    pathname.startsWith('/_next') ||
-    pathname.includes('.') || // 带有后缀的文件如 .png, .js, .json
-    backendApiEndpoints.some((path) => pathname.startsWith(path))
-  );
-};
-// ============ BASIC AUTH 逻辑结束 ============
-
+// Create debug logger instances
 const logDefault = debug('middleware:default');
 const logNextAuth = debug('middleware:next-auth');
 const logClerk = debug('middleware:clerk');
 
+// OIDC session pre-sync constant
 const OIDC_SESSION_HEADER = 'x-oidc-session-sync';
 
-// 这里的 matcher 保持广泛匹配，逻辑交给中间件内部处理
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|manifest.json|icons).*)',
+    // 保持原有的匹配规则
+    '/(api|trpc|webapi)(.*)',
+    '/',
+    '/discover',
+    '/discover(.*)',
+    '/labs',
+    '/chat',
+    '/chat(.*)',
+    '/changelog(.*)',
+    '/settings(.*)',
+    '/image',
+    '/knowledge',
+    '/knowledge(.*)',
+    '/profile(.*)',
+    '/me',
+    '/me(.*)',
+
+    '/login(.*)',
+    '/signup(.*)',
+    '/next-auth/(.*)',
+    '/oauth(.*)',
+    '/oidc(.*)',
   ],
 };
 
 const backendApiEndpoints = ['/api', '/trpc', '/webapi', '/oidc'];
 
 const defaultMiddleware = (request: NextRequest) => {
+  // --- 注入：执行 Basic Auth 校验 ---
+  const authRes = handleBasicAuth(request);
+  if (authRes) return authRes;
+
   const url = new URL(request.url);
-  const { pathname } = url;
-
-  // 1. 【关键优化】如果是 API 或 静态资源，跳过 Basic Auth，直接进入 LobeChat 逻辑
-  if (isStaticOrApi(pathname, backendApiEndpoints)) {
-    // 如果是 API 请求，额外做个简单的 log 跳过
-    if (backendApiEndpoints.some((path) => pathname.startsWith(path))) {
-      logDefault('Skipping Basic Auth for API: %s', pathname);
-    }
-  } else {
-    // 2. 如果是页面请求（/chat, /settings 等），执行 Basic Auth
-    const authResponse = handleBasicAuth(request);
-    if (authResponse) return authResponse;
-  }
-
   logDefault('Processing request: %s %s', request.method, request.url);
 
-  // --- 原有 LobeChat 逻辑开始 ---
+  // skip all api requests
   if (backendApiEndpoints.some((path) => url.pathname.startsWith(path))) {
+    logDefault('Skipping API request: %s', url.pathname);
     return NextResponse.next();
   }
 
-  const theme = request.cookies.get(LOBE_THEME_APPEARANCE)?.value || parseDefaultThemeFromCountry(request);
+  // 1. Read user preferences from cookies
+  const theme =
+    request.cookies.get(LOBE_THEME_APPEARANCE)?.value || parseDefaultThemeFromCountry(request);
+
   const explicitlyLocale = (url.searchParams.get('hl') || undefined) as Locales | undefined;
   const browserLanguage = parseBrowserLanguage(request.headers);
-  const locale = explicitlyLocale || ((request.cookies.get(LOBE_LOCALE_COOKIE)?.value || browserLanguage) as Locales);
-  
+  const locale =
+    explicitlyLocale ||
+    ((request.cookies.get(LOBE_LOCALE_COOKIE)?.value || browserLanguage) as Locales);
+
   const ua = request.headers.get('user-agent');
   const device = new UAParser(ua || '').getDevice();
 
+  logDefault('User preferences: %O', {
+    browserLanguage,
+    deviceType: device.type,
+    hasCookies: {
+      locale: !!request.cookies.get(LOBE_LOCALE_COOKIE)?.value,
+      theme: !!request.cookies.get(LOBE_THEME_APPEARANCE)?.value,
+    },
+    locale,
+    theme,
+  });
+
+  // 2. Create normalized preference values
   const route = RouteVariants.serializeVariants({
     isMobile: device.type === 'mobile',
     locale,
     theme,
   });
+
+  logDefault('Serialized route variant: %s', route);
 
   if (appEnv.MIDDLEWARE_REWRITE_THROUGH_LOCAL) {
     url.protocol = 'http';
@@ -116,9 +148,8 @@ const defaultMiddleware = (request: NextRequest) => {
   }
 
   const nextPathname = `/${route}` + (url.pathname === '/' ? '' : url.pathname);
-  const nextURL = appEnv.MIDDLEWARE_REWRITE_THROUGH_LOCAL ? urlJoin(url.origin, nextPathname) : nextPathname;
-
   url.pathname = nextPathname;
+
   const rewrite = NextResponse.rewrite(url, { status: 200 });
 
   if (explicitlyLocale) {
@@ -136,17 +167,33 @@ const defaultMiddleware = (request: NextRequest) => {
   return rewrite;
 };
 
-// ... 后续的 RouteMatcher 保持不变 ...
-const isPublicRoute = createRouteMatcher(['/api/auth(.*)', '/api/webhooks(.*)', '/webapi(.*)', '/trpc(.*)', '/next-auth/(.*)', '/login', '/signup', '/oauth/consent/(.*)', '/oidc/handoff', '/oidc/token']);
-const isProtectedRoute = createRouteMatcher(['/settings(.*)', '/knowledge(.*)', '/onboard(.*)', '/oauth(.*)']);
+const isPublicRoute = createRouteMatcher([
+  '/api/auth(.*)',
+  '/api/webhooks(.*)',
+  '/webapi(.*)',
+  '/trpc(.*)',
+  '/next-auth/(.*)',
+  '/login',
+  '/signup',
+  '/oauth/consent/(.*)',
+  '/oidc/handoff',
+  '/oidc/token',
+]);
 
-// NextAuth 包装
+const isProtectedRoute = createRouteMatcher([
+  '/settings(.*)',
+  '/knowledge(.*)',
+  '/onboard(.*)',
+  '/oauth(.*)',
+]);
+
+// Initialize an Edge compatible NextAuth middleware
 const nextAuthMiddleware = NextAuth.auth((req) => {
-  // 注入 Basic Auth (仅限非 API/静态资源)
-  if (!isStaticOrApi(req.nextUrl.pathname, backendApiEndpoints)) {
-    const authResponse = handleBasicAuth(req);
-    if (authResponse) return authResponse;
-  }
+  // --- 注入：NextAuth 模式下的 Basic Auth ---
+  const authRes = handleBasicAuth(req);
+  if (authRes) return authRes;
+
+  logNextAuth('NextAuth middleware processing request: %s %s', req.method, req.url);
 
   const response = defaultMiddleware(req);
   const isProtected = appEnv.ENABLE_AUTH_PROTECTION ? !isPublicRoute(req) : isProtectedRoute(req);
@@ -156,42 +203,4 @@ const nextAuthMiddleware = NextAuth.auth((req) => {
   response.headers.delete(OAUTH_AUTHORIZED);
   if (isLoggedIn) {
     response.headers.set(OAUTH_AUTHORIZED, 'true');
-    if (oidcEnv.ENABLE_OIDC && session?.user?.id) {
-      response.headers.set(OIDC_SESSION_HEADER, session.user.id);
-    }
-  } else if (isProtected) {
-    const nextLoginUrl = new URL('/next-auth/signin', req.nextUrl.origin);
-    nextLoginUrl.searchParams.set('callbackUrl', req.nextUrl.href);
-    return Response.redirect(nextLoginUrl);
-  }
-  return response;
-});
-
-// Clerk 包装
-const clerkAuthMiddleware = clerkMiddleware(
-  async (auth, req) => {
-    // 注入 Basic Auth (仅限非 API/静态资源)
-    if (!isStaticOrApi(req.nextUrl.pathname, backendApiEndpoints)) {
-      const authResponse = handleBasicAuth(req);
-      if (authResponse) return authResponse;
-    }
-
-    const isProtected = appEnv.ENABLE_AUTH_PROTECTION ? !isPublicRoute(req) : isProtectedRoute(req);
-    if (isProtected) await auth.protect();
-
-    const response = defaultMiddleware(req);
-    const data = await auth();
-
-    if (oidcEnv.ENABLE_OIDC && data.userId) {
-      response.headers.set(OIDC_SESSION_HEADER, data.userId);
-    }
-    return response;
-  },
-  { clockSkewInMs: 60 * 60 * 1000, signInUrl: '/login', signUpUrl: '/signup' }
-);
-
-export default authEnv.NEXT_PUBLIC_ENABLE_CLERK_AUTH
-  ? clerkAuthMiddleware
-  : authEnv.NEXT_PUBLIC_ENABLE_NEXT_AUTH
-    ? nextAuthMiddleware
-    : defaultMiddleware;
+    if (
